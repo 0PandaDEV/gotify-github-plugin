@@ -1,6 +1,6 @@
 BUILDDIR=./build
 GOTIFY_VERSION=master
-PLUGIN_NAME=myplugin
+PLUGIN_NAME=gotify-github-plugin
 PLUGIN_ENTRY=plugin.go
 GO_VERSION=`cat $(BUILDDIR)/gotify-server-go-version`
 DOCKER_BUILD_IMAGE=gotify/build
@@ -9,14 +9,14 @@ DOCKER_RUN=docker run --rm -v "$$PWD/.:${DOCKER_WORKDIR}" -v "`go env GOPATH`/pk
 DOCKER_GO_BUILD=go build -mod=readonly -a -installsuffix cgo -ldflags "$$LD_FLAGS" -buildmode=plugin 
 
 download-tools:
-	GO111MODULE=off go get -u github.com/gotify/plugin-api/cmd/gomod-cap
+	go install github.com/gotify/plugin-api/cmd/gomod-cap@latest
 
 create-build-dir:
 	mkdir -p ${BUILDDIR} || true
 
 update-go-mod: create-build-dir
 	wget -LO ${BUILDDIR}/gotify-server.mod https://raw.githubusercontent.com/gotify/server/${GOTIFY_VERSION}/go.mod
-	gomod-cap -from ${BUILDDIR}/gotify-server.mod -to go.mod
+	$(shell go env GOPATH)/bin/gomod-cap -from ${BUILDDIR}/gotify-server.mod -to go.mod
 	rm ${BUILDDIR}/gotify-server.mod || true
 	go mod tidy
 
