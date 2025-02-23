@@ -14,7 +14,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          key: linux-amd64-${{ runner.os }}-go-${{ hashFiles('go.sum') }}
       - name: Download Tools
         run: make download-tools
       - name: Build linux-amd64
@@ -35,7 +35,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          key: linux-arm-7-${{ runner.os }}-go-${{ hashFiles('go.sum') }}
       - name: Download Tools
         run: make download-tools
       - name: Build linux-arm-7
@@ -56,7 +56,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          key: linux-arm64-${{ runner.os }}-go-${{ hashFiles('go.sum') }}
       - name: Download Tools
         run: make download-tools
       - name: Build linux-arm64
