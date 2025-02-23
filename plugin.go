@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"time"
 
@@ -46,6 +46,7 @@ type MyPlugin struct {
 	pollInterval  time.Duration
 	lastCheckTime time.Time
 	appID         uint
+	msgHandler    plugin.MessageHandler
 }
 
 // Enable enables the plugin.
@@ -92,18 +93,37 @@ func (c *MyPlugin) checkNotifications() {
 	}
 	defer resp.Body.Close()
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	var notifications []GithubNotification
 	json.Unmarshal(body, &notifications)
 
 	for _, notification := range notifications {
 		if notification.UpdatedAt.After(c.lastCheckTime) {
-			messageID := c.ctx.ID
-			name := c.ctx.Name
-			fmt.Printf("Notification for user %s with id %d\n", name, messageID)
+			msg := &plugin.Message{
+				Title:    notification.Subject.Title,
+				Message:  fmt.Sprintf("New notification in %s", notification.Repository.FullName),
+				Priority: 2,
+			}
+			c.msgHandler.SendMessage(*msg)
 		}
 	}
 	c.lastCheckTime = time.Now()
+}
+
+// GetDefaultConfig implements plugin.Configurer
+func (c *MyPlugin) GetDefaultConfig() any {
+	return struct {
+		Token    string `json:"token"`
+		Interval int    `json:"interval"`
+	}{
+		Token:    "",
+		Interval: 60,
+	}
+}
+
+// ValidateConfig implements plugin.Configurer
+func (c *MyPlugin) ValidateConfig(config any) error {
+	return nil
 }
 
 // RegisterWebhook implements plugin.Webhooker.
@@ -116,6 +136,7 @@ func (c *MyPlugin) RegisterWebhook(basePath string, g *gin.RouterGroup) {
 		context.BindJSON(&config)
 		c.githubToken = config.Token
 		c.pollInterval = time.Duration(config.Interval) * time.Second
+		context.JSON(200, gin.H{"success": true})
 	})
 }
 
@@ -125,7 +146,12 @@ func NewGotifyPluginInstance(ctx plugin.UserContext) plugin.Plugin {
 		ctx:          ctx,
 		pollInterval: 60 * time.Second,
 		enabled:      false,
+		appID:        ctx.ID,
 	}
+}
+
+func (c *MyPlugin) SetMessageHandler(h plugin.MessageHandler) {
+	c.msgHandler = h
 }
 
 func main() {
