@@ -1,4 +1,4 @@
-name: Build and Push Artifacts
+name: Build
 
 on:
   push:
@@ -8,6 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
       - name: Download Tools
         run: make download-tools
       - name: Build linux-amd64
@@ -22,6 +29,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
       - name: Download Tools
         run: make download-tools
       - name: Build linux-arm-7
@@ -36,6 +50,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
       - name: Download Tools
         run: make download-tools
       - name: Build linux-arm64
@@ -45,17 +66,3 @@ jobs:
         with:
           name: gotify-github-plugin-linux-arm64
           path: build/gotify-github-plugin-linux-arm64*.so
-
-  push-artifacts:
-    runs-on: ubuntu-latest
-    needs:
-      - build-linux-amd64
-      - build-linux-arm-7
-      - build-linux-arm64
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      - name: Push Artifacts
-        run: |
-          ls -la artifacts 
