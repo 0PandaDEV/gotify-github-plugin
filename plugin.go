@@ -148,6 +148,13 @@ func (c *MyPlugin) checkNotifications() {
 				Title:    notification.Subject.Title,
 				Message:  fmt.Sprintf("New notification in %s", notification.Repository.FullName),
 				Priority: 2,
+				Extras: map[string]interface{}{
+					"client::notification": map[string]interface{}{
+						"click": map[string]interface{}{
+							"url": notification.Subject.URL,
+						},
+					},
+				},
 			}
 			if err := c.msgHandler.SendMessage(*msg); err != nil {
 				log.Printf("error sending github notification: %v", err)
@@ -213,6 +220,13 @@ func (c *MyPlugin) checkStars() {
 					Title:    "New Star",
 					Message:  fmt.Sprintf("Repo %s received a star from %s at %s", repo.FullName, star.User.Login, star.StarredAt.Format(time.RFC1123)),
 					Priority: 2,
+					Extras: map[string]interface{}{
+						"client::notification": map[string]interface{}{
+							"click": map[string]interface{}{
+								"url": "https://github.com/" + repo.FullName,
+							},
+						},
+					},
 				}
 				if err := c.msgHandler.SendMessage(*msg); err != nil {
 					log.Printf("error sending star notification: %v", err)
