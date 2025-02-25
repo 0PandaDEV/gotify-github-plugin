@@ -325,10 +325,13 @@ func (c *MyPlugin) checkStars() {
 		return
 	}
 
-	log.Printf("Found %d repos to check for stars", len(repos))
+	repoNames := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		repoNames = append(repoNames, repo.FullName)
+	}
+	log.Printf("Checking stars for repos: %v", repoNames)
 
 	for _, repo := range repos {
-		log.Printf("Checking stars for repo: %s", repo.FullName)
 		repoURL := fmt.Sprintf("https://api.github.com/repos/%s/stargazers", repo.FullName)
 		req, err := http.NewRequest("GET", repoURL, nil)
 		if err != nil {
@@ -363,11 +366,8 @@ func (c *MyPlugin) checkStars() {
 			continue
 		}
 
-		log.Printf("Found %d stars for repo %s", len(stars), repo.FullName)
-
 		for _, star := range stars {
 			starKey := fmt.Sprintf("%s:%s", repo.FullName, star.User.Login)
-			log.Printf("Processing star: %s by user %s at %s", repo.FullName, star.User.Login, star.StarredAt)
 			if !c.seenStars[starKey] {
 				log.Printf("New star detected: %s starred %s", star.User.Login, repo.FullName)
 				c.seenStars[starKey] = true
@@ -389,8 +389,6 @@ func (c *MyPlugin) checkStars() {
 				} else {
 					log.Printf("sent star notification for repo %s", repo.FullName)
 				}
-			} else {
-				log.Printf("Star %s already seen, skipping", starKey)
 			}
 		}
 	}
