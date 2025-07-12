@@ -37,6 +37,8 @@ type MyPlugin struct {
 	appToken          string
 	watchStars        bool
 	msgHandler        plugin.MessageHandler
+	seenNotifications map[string]bool
+	seenStars         map[string]bool
 }
 
 func (c *MyPlugin) DefaultConfig() any {
@@ -82,15 +84,104 @@ func (c *MyPlugin) ValidateAndSetConfig(cfg interface{}) error {
 
 func (c *MyPlugin) Enable() error {
 	if c.appToken != "" {
-		log.Printf("Using custom application token")
 	} else {
 		c.appID = c.ctx.ID
-		log.Printf("Using default application with ID: %d", c.appID)
 	}
 	c.enabled = true
+	c.lastCheckTime = time.Now()
+	if c.watchStars {
+		c.lastStarCheckTime = time.Now()
+	}
+
+	c.seenNotifications = make(map[string]bool)
+	c.seenStars = make(map[string]bool)
+
+	c.fetchInitialState()
+
 	c.stopChannel = make(chan struct{})
 	go c.startPolling()
 	return nil
+}
+
+func (c *MyPlugin) fetchInitialState() {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", "https://api.github.com/notifications", nil)
+	if err != nil {
+		return
+	}
+	req.Header.Add("Authorization", "token "+c.githubToken)
+	req.Header.Add("Accept", "application/vnd.github.v3+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var notifications []GithubNotification
+	if err := json.NewDecoder(resp.Body).Decode(&notifications); err != nil {
+		return
+	}
+
+	for _, notification := range notifications {
+		c.seenNotifications[notification.ID] = true
+	}
+
+	if c.watchStars {
+		c.fetchInitialStars()
+	}
+}
+
+func (c *MyPlugin) fetchInitialStars() {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", "https://api.github.com/user/repos", nil)
+	if err != nil {
+		return
+	}
+	req.Header.Add("Authorization", "token "+c.githubToken)
+	req.Header.Add("Accept", "application/vnd.github.v3+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var repos []struct {
+		FullName string `json:"full_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
+		return
+	}
+
+	for _, repo := range repos {
+		repoURL := fmt.Sprintf("https://api.github.com/repos/%s/stargazers", repo.FullName)
+		req, err := http.NewRequest("GET", repoURL, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Add("Authorization", "token "+c.githubToken)
+		req.Header.Add("Accept", "application/vnd.github.v3.star+json")
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+
+		var stars []struct {
+			StarredAt time.Time `json:"starred_at"`
+			User      struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&stars); err != nil {
+			resp.Body.Close()
+			continue
+		}
+		resp.Body.Close()
+
+		for _, star := range stars {
+			starKey := fmt.Sprintf("%s:%s", repo.FullName, star.User.Login)
+			c.seenStars[starKey] = true
+		}
+	}
 }
 
 func (c *MyPlugin) Disable() error {
@@ -121,32 +212,46 @@ func (c *MyPlugin) checkNotifications() {
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", "https://api.github.com/notifications", nil)
 	if err != nil {
-		log.Printf("error creating github notifications request: %v", err)
 		return
 	}
 	req.Header.Add("Authorization", "token "+c.githubToken)
 	req.Header.Add("Accept", "application/vnd.github.v3+json")
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("error executing github notifications request: %v", err)
 		return
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("error reading github notifications response: %v", err)
 		return
 	}
 	var notifications []GithubNotification
 	if err := json.Unmarshal(body, &notifications); err != nil {
-		log.Printf("error unmarshalling github notifications: %v", err)
 		return
 	}
+
 	for _, notification := range notifications {
-		if notification.UpdatedAt.After(c.lastCheckTime) {
+		if !c.seenNotifications[notification.ID] {
+			log.Printf("New notification found: %s", notification.ID)
+			c.seenNotifications[notification.ID] = true
+
+			notificationType := ""
+			switch notification.Subject.Type {
+			case "Issue":
+				notificationType = "Issue"
+			case "PullRequest":
+				notificationType = "PR"
+			case "Release":
+				notificationType = "Release"
+			case "Discussion":
+				notificationType = "Discussion"
+			default:
+				notificationType = notification.Subject.Type
+			}
+
 			msg := &plugin.Message{
-				Title:    notification.Subject.Title,
-				Message:  fmt.Sprintf("New notification in %s", notification.Repository.FullName),
+				Title:    fmt.Sprintf("[%s] %s", notificationType, notification.Subject.Title),
+				Message:  fmt.Sprintf("New %s notification in %s", notificationType, notification.Repository.FullName),
 				Priority: 2,
 				Extras: map[string]interface{}{
 					"client::notification": map[string]interface{}{
@@ -163,21 +268,18 @@ func (c *MyPlugin) checkNotifications() {
 			}
 		}
 	}
-	c.lastCheckTime = time.Now()
 }
 
 func (c *MyPlugin) checkStars() {
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", "https://api.github.com/user/repos", nil)
 	if err != nil {
-		log.Printf("error creating repos request: %v", err)
 		return
 	}
 	req.Header.Add("Authorization", "token "+c.githubToken)
 	req.Header.Add("Accept", "application/vnd.github.v3+json")
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("error executing repos request: %v", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -185,40 +287,49 @@ func (c *MyPlugin) checkStars() {
 		FullName string `json:"full_name"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
-		log.Printf("error decoding repos: %v", err)
 		return
 	}
+
 	for _, repo := range repos {
 		repoURL := fmt.Sprintf("https://api.github.com/repos/%s/stargazers", repo.FullName)
 		req, err := http.NewRequest("GET", repoURL, nil)
 		if err != nil {
-			log.Printf("error creating stargazers request for %s: %v", repo.FullName, err)
 			continue
 		}
 		req.Header.Add("Authorization", "token "+c.githubToken)
 		req.Header.Add("Accept", "application/vnd.github.v3.star+json")
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("error executing stargazers request for %s: %v", repo.FullName, err)
 			continue
 		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			resp.Body.Close()
+			continue
+		}
+		resp.Body.Close()
+
 		var stars []struct {
 			StarredAt time.Time `json:"starred_at"`
 			User      struct {
 				Login string `json:"login"`
 			} `json:"user"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&stars); err != nil {
-			log.Printf("error decoding stargazers for %s: %v", repo.FullName, err)
-			resp.Body.Close()
+
+		if err := json.Unmarshal(body, &stars); err != nil {
 			continue
 		}
-		resp.Body.Close()
+
 		for _, star := range stars {
-			if star.StarredAt.After(c.lastStarCheckTime) {
+			starKey := fmt.Sprintf("%s:%s", repo.FullName, star.User.Login)
+			if !c.seenStars[starKey] {
+				log.Printf("New star detected: %s starred %s", star.User.Login, repo.FullName)
+				c.seenStars[starKey] = true
+
 				msg := &plugin.Message{
 					Title:    "New Star",
-					Message:  fmt.Sprintf("Repo %s received a star from %s at %s", repo.FullName, star.User.Login, star.StarredAt.Format(time.RFC1123)),
+					Message:  fmt.Sprintf("Repo %s received a star from %s", repo.FullName, star.User.Login),
 					Priority: 2,
 					Extras: map[string]interface{}{
 						"client::notification": map[string]interface{}{
@@ -236,7 +347,6 @@ func (c *MyPlugin) checkStars() {
 			}
 		}
 	}
-	c.lastStarCheckTime = time.Now()
 }
 
 func GetGotifyPluginInfo() plugin.Info {
